@@ -32,8 +32,8 @@ if not os.path.exists('weights/'):
     os.makedirs('weights/')
 
 
-def train_model(model: Model, dataset_id, dataset_prefix, epochs=50, batch_size=128, val_subset=None,
-                cutoff=None, normalize_timeseries=False, learning_rate=1e-3):
+def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batch_size=128, val_subset = None,
+                val_split = 1/ 3, cutoff=None, normalize_timeseries=False, learning_rate=1e-3, random_state = 0):
     """
     Trains a provided Model, given a dataset id.
 
@@ -58,26 +58,15 @@ def train_model(model: Model, dataset_id, dataset_prefix, epochs=50, batch_size=
             If 2: Performs full dataset z-normalization.
         learning_rate: Initial learning rate.
     """
-    X_train, y_train, X_test, y_test, is_timeseries = load_dataset_at(dataset_id,
-                                                                      normalize_timeseries=normalize_timeseries)
-    max_nb_words, sequence_length = calculate_dataset_metrics(X_train)
-
-    if sequence_length != MAX_SEQUENCE_LENGTH_LIST[dataset_id]:
-        if cutoff is None:
-            choice = cutoff_choice(dataset_id, sequence_length)
-        else:
-            assert cutoff in ['pre', 'post'], 'Cutoff parameter value must be either "pre" or "post"'
-            choice = cutoff
-
-        if choice not in ['pre', 'post']:
-            return
-        else:
-            X_train, X_test = cutoff_sequence(X_train, X_test, choice, dataset_id, sequence_length)
-
-    if not is_timeseries:
-        X_train = pad_sequences(X_train, maxlen=MAX_SEQUENCE_LENGTH_LIST[dataset_id], padding='post', truncating='post')
-        X_test = pad_sequences(X_test, maxlen=MAX_SEQUENCE_LENGTH_LIST[dataset_id], padding='post', truncating='post')
-
+    inds = np.arange(series_values.shape[0])
+    np.random.shuffle(inds)
+    series_values = series_values[inds]
+    labels = labels[inds]
+    val_split = int(val_split * series_values.shape[0])
+    X_train, y_train = series_values[:-val_split], labels[:-val_split]
+    X_test, y_test = series_values[-val_split:], labels[-val_split:]
+    
+    sequence_length = series.values.shape[1]
     classes = np.unique(y_train)
     le = LabelEncoder()
     y_ind = le.fit_transform(y_train.ravel())
@@ -90,25 +79,10 @@ def train_model(model: Model, dataset_id, dataset_prefix, epochs=50, batch_size=
     y_train = to_categorical(y_train, len(np.unique(y_train)))
     y_test = to_categorical(y_test, len(np.unique(y_test)))
 
-    if is_timeseries:
-        factor = 1. / np.cbrt(2)
-    else:
-        factor = 1. / np.sqrt(2)
+    all_weights_path = os.path.join('weights', run_prefix)
 
-    path_splits = os.path.split(dataset_prefix)
-    if len(path_splits) > 1:
-        base_path = os.path.join('weights', *path_splits)
-
-        if not os.path.exists(base_path):
-            os.makedirs(base_path)
-
-        base_path = os.path.join(base_path, path_splits[-1])
-
-    else:
-        all_weights_path = os.path.join('weights', dataset_prefix)
-
-        if not os.path.exists(all_weights_path):
-            os.makedirs(all_weights_path)
+    if not os.path.exists(all_weights_path):
+        os.makedirs(all_weights_path)
 
     model_checkpoint = ModelCheckpoint("./weights/%s_weights.h5" % dataset_prefix, verbose=1,
                                        monitor='loss', save_best_only=True, save_weights_only=True)
@@ -129,7 +103,7 @@ def train_model(model: Model, dataset_id, dataset_prefix, epochs=50, batch_size=
               class_weight=class_weight, verbose=2, validation_data=(X_test, y_test))
 
 
-def evaluate_model(model: Model, dataset_id, dataset_prefix, batch_size=128, test_data_subset=None,
+def evaluate_model(model: Model, X_test, y_test, run_prefix, batch_size=128, test_data_subset,
                    cutoff=None, normalize_timeseries=False):
     """
     Evaluates a given Keras Model on the provided dataset.
@@ -155,31 +129,14 @@ def evaluate_model(model: Model, dataset_id, dataset_prefix, batch_size=128, tes
     Returns:
         The test set accuracy of the model.
     """
-    _, _, X_test, y_test, is_timeseries = load_dataset_at(dataset_id,
-                                                          normalize_timeseries=normalize_timeseries)
-    max_nb_words, sequence_length = calculate_dataset_metrics(X_test)
-
-    if sequence_length != MAX_SEQUENCE_LENGTH_LIST[dataset_id]:
-        if cutoff is None:
-            choice = cutoff_choice(dataset_id, sequence_length)
-        else:
-            assert cutoff in ['pre', 'post'], 'Cutoff parameter value must be either "pre" or "post"'
-            choice = cutoff
-
-        if choice not in ['pre', 'post']:
-            return
-        else:
-            _, X_test = cutoff_sequence(None, X_test, choice, dataset_id, sequence_length)
-
-    if not is_timeseries:
-        X_test = pad_sequences(X_test, maxlen=MAX_SEQUENCE_LENGTH_LIST[dataset_id], padding='post', truncating='post')
+    sequence_length = X_test.shape[1]
     y_test = to_categorical(y_test, len(np.unique(y_test)))
 
     optm = Adam(lr=1e-3)
     model.compile(optimizer=optm, loss='categorical_crossentropy', metrics=['accuracy'])
 
-    model.load_weights("./weights/%s_weights.h5" % dataset_prefix)
-    print("Weights loaded from ", "./weights/%s_weights.h5" % dataset_prefix)
+    model.load_weights("./weights/%s_weights.h5" % run_prefix)
+    print("Weights loaded from ", "./weights/%s_weights.h5" % run_prefix)
 
     if test_data_subset is not None:
         X_test = X_test[:test_data_subset]
