@@ -16,7 +16,7 @@ from keras.layers import Permute
 from keras.optimizers import Adam
 from keras.utils import to_categorical
 from keras.preprocessing.sequence import pad_sequences
-from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, LearningRateScheduler
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, LearningRateScheduler, EarlyStopping
 from keras.wrappers.scikit_learn import KerasClassifier
 from keras import backend as K
 
@@ -66,7 +66,7 @@ def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batc
     X_train, y_train = series_values[:-val_split], labels[:-val_split]
     X_test, y_test = series_values[-val_split:], labels[-val_split:]
     
-    sequence_length = series.values.shape[1]
+    sequence_length = series_values.shape[1]
     classes = np.unique(y_train)
     le = LabelEncoder()
     y_ind = le.fit_transform(y_train.ravel())
@@ -84,12 +84,13 @@ def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batc
     if not os.path.exists(all_weights_path):
         os.makedirs(all_weights_path)
 
-    model_checkpoint = ModelCheckpoint("./weights/%s_weights.h5" % dataset_prefix, verbose=1,
-                                       monitor='loss', save_best_only=True, save_weights_only=True)
-    reduce_lr = ReduceLROnPlateau(monitor='loss', patience=100, mode='auto',
-                                  factor=factor, cooldown=0, min_lr=1e-4, verbose=2)
+    model_checkpoint = ModelCheckpoint("./weights/%s_weights.h5" % run_prefix, verbose=1,
+                                       monitor='val_loss', save_best_only=True, save_weights_only=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', patience=20, mode='auto',
+                                  factor=1. / np.cbrt(2), cooldown=0, min_lr=1e-4, verbose=2)
+    earlystopping = EarlyStopping(monitor = 'val_loss', patience=100)
 
-    callback_list = [model_checkpoint, reduce_lr]
+    callback_list = [model_checkpoint, reduce_lr, earlystopping]
 
     optm = Adam(lr=learning_rate)
 
@@ -103,7 +104,7 @@ def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batc
               class_weight=class_weight, verbose=2, validation_data=(X_test, y_test))
 
 
-def evaluate_model(model: Model, X_test, y_test, run_prefix, batch_size=128, test_data_subset,
+def evaluate_model(model: Model, X_test, y_test, run_prefix, test_data_subset=None, batch_size=128,
                    cutoff=None, normalize_timeseries=False):
     """
     Evaluates a given Keras Model on the provided dataset.
