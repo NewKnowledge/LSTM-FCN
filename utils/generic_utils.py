@@ -168,9 +168,8 @@ def calculate_dataset_metrics(X_train):
     return max_nb_words, max_sequence_length
 
 
-def plot_dataset(dataset_id, seed=None, limit=None, cutoff=None,
-                 normalize_timeseries=False, plot_data=None,
-                 type='Context', plot_classwise=False):
+def plot_dataset(series_values, labels, run_prefix, val_split = 1/3, seed=None, limit=None, cutoff=None,
+                 plot_data=None, type='Context', plot_classwise=False):
     """
     Util method to plot a dataset under several possibilities.
 
@@ -198,32 +197,19 @@ def plot_dataset(dataset_id, seed=None, limit=None, cutoff=None,
             the number of classes so it is better to set `limit` to 1 in
             such cases
     """
+    inds = np.arange(series_values.shape[0])
     np.random.seed(seed)
+    np.random.shuffle(inds)
+    series_values = series_values[inds]
+    labels = labels[inds]
+    val_split = int(val_split * series_values.shape[0])
+    X_train, y_train = series_values[:-val_split], labels[:-val_split]
+    X_test, y_test = series_values[-val_split:], labels[-val_split:]
+    
+    sequence_length = series_values.shape[1]
+    classes = np.unique(y_train)
 
     if plot_data is None:
-        X_train, y_train, X_test, y_test, is_timeseries = load_dataset_at(
-                                                               dataset_id,
-                                                               normalize_timeseries=normalize_timeseries)
-
-        if not is_timeseries:
-            print("Can plot time series input data only!\n"
-                  "Continuing without plot!")
-            return
-
-        max_nb_words, sequence_length = calculate_dataset_metrics(X_train)
-
-        if sequence_length != MAX_SEQUENCE_LENGTH_LIST[dataset_id]:
-            if cutoff is None:
-                choice = cutoff_choice(dataset_id, sequence_length)
-            else:
-                assert cutoff in ['pre', 'post'], 'Cutoff parameter value must be either "pre" or "post"'
-                choice = cutoff
-
-            if choice not in ['pre', 'post']:
-                return
-            else:
-                X_train, X_test = X_test(X_train, X_test, choice, dataset_id, sequence_length)
-
         X_train_attention = None
         X_test_attention = None
 
@@ -239,8 +225,8 @@ def plot_dataset(dataset_id, seed=None, limit=None, cutoff=None,
             test_size = limit
         else:
             assert limit == 1, 'If plotting classwise, limit must be 1 so as to ensure number of samples per class = 1'
-            train_size = NB_CLASSES_LIST[dataset_id] * limit
-            test_size = NB_CLASSES_LIST[dataset_id] * limit
+            train_size = classes * limit
+            test_size = classes * limit
 
     if not plot_classwise:
         train_idx = np.random.randint(0, X_train.shape[0], size=train_size)
@@ -258,7 +244,7 @@ def plot_dataset(dataset_id, seed=None, limit=None, cutoff=None,
 
         classwise_sample_size_list = [len(x[0]) for x in classwise_train_list]
         size = min(classwise_sample_size_list)
-        train_size = min([train_size // NB_CLASSES_LIST[dataset_id], size])
+        train_size = min([train_size // classes, size])
 
         for i in range(len(classwise_train_list)):
             classwise_train_idx = np.random.randint(0, len(classwise_train_list[i][0]), size=train_size)
@@ -303,7 +289,7 @@ def plot_dataset(dataset_id, seed=None, limit=None, cutoff=None,
 
         classwise_sample_size_list = [len(x[0]) for x in classwise_test_list]
         size = min(classwise_sample_size_list)
-        test_size = min([test_size // NB_CLASSES_LIST[dataset_id], size])
+        test_size = min([test_size // classes, size])
 
         for i in range(len(classwise_test_list)):
             classwise_test_idx = np.random.randint(0, len(classwise_test_list[i][0]), size=test_size)

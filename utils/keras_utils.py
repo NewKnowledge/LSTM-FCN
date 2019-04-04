@@ -5,9 +5,10 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 from sklearn.model_selection import GridSearchCV, train_test_split
 from skimage.transform import resize
+from sklearn.metrics import classification_report
 
 import warnings
 
@@ -59,6 +60,7 @@ def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batc
         learning_rate: Initial learning rate.
     """
     inds = np.arange(series_values.shape[0])
+    np.random.seed(random_state)
     np.random.shuffle(inds)
     series_values = series_values[inds]
     labels = labels[inds]
@@ -143,11 +145,10 @@ def evaluate_model(model: Model, X_test, y_test, run_prefix, test_data_subset=No
         X_test = X_test[:test_data_subset]
         y_test = y_test[:test_data_subset]
 
-    print("\nEvaluating : ")
+    print("\nEvaluating on {} predictions: ".format(len(y_test)))
     loss, accuracy = model.evaluate(X_test, y_test, batch_size=batch_size)
-    print()
     print("Final Accuracy : ", accuracy)
-
+    print(classification_report(np.argmax(y_test,axis=1), np.argmax(model.predict(X_test), axis=1), target_names = ['non-anomalous', 'anomalous']))
     return accuracy
 
 
@@ -246,8 +247,8 @@ def get_outputs(model, inputs, eval_functions, verbose=False):
     return outputs
 
 
-def visualize_context_vector(model: Model, dataset_id, dataset_prefix, cutoff=None, limit=None,
-                             normalize_timeseries=False, visualize_sequence=True, visualize_classwise=False):
+def visualize_context_vector(model: Model, series_values, labels, run_prefix, cutoff=None, limit=None,
+                             val_split = 1/ 3, random_state = 0, visualize_sequence=True, visualize_classwise=False):
     """
     Visualize the Context Vector of the Attention LSTM.
 
@@ -277,21 +278,16 @@ def visualize_context_vector(model: Model, dataset_id, dataset_prefix, cutoff=No
             such cases.
     """
 
-    X_train, y_train, X_test, y_test, is_timeseries = load_dataset_at(dataset_id,
-                                                                      normalize_timeseries=normalize_timeseries)
-    _, sequence_length = calculate_dataset_metrics(X_train)
-
-    if sequence_length != MAX_SEQUENCE_LENGTH_LIST[dataset_id]:
-        if cutoff is None:
-            choice = cutoff_choice(dataset_id, sequence_length)
-        else:
-            assert cutoff in ['pre', 'post'], 'Cutoff parameter value must be either "pre" or "post"'
-            choice = cutoff
-
-        if choice not in ['pre', 'post']:
-            return
-        else:
-            X_train, X_test = cutoff_sequence(X_train, X_test, choice, dataset_id, sequence_length)
+    inds = np.arange(series_values.shape[0])
+    np.random.seed(random_state)
+    np.random.shuffle(inds)
+    series_values = series_values[inds]
+    labels = labels[inds]
+    val_split = int(val_split * series_values.shape[0])
+    X_train, y_train = series_values[:-val_split], labels[:-val_split]
+    X_test, y_test = series_values[-val_split:], labels[-val_split:]
+    
+    sequence_length = series_values.shape[1]
 
     attn_lstm_layer = [(i, layer) for (i, layer) in enumerate(model.layers)
                        if layer.__class__.__name__ == 'AttentionLSTM']
@@ -304,7 +300,7 @@ def visualize_context_vector(model: Model, dataset_id, dataset_prefix, cutoff=No
     attn_lstm_layer.return_attention = True
 
     model.layers[i] = attn_lstm_layer
-    model.load_weights("./weights/%s_weights.h5" % dataset_prefix)
+    model.load_weights("./weights/%s_weights.h5" % run_prefix)
 
     attention_output = model.layers[i].call(model.input)
 
@@ -359,9 +355,8 @@ def visualize_context_vector(model: Model, dataset_id, dataset_prefix, cutoff=No
         X_train_attention = train_attention_vectors * X_train
         X_test_attention = test_attention_vectors * X_test
 
-        plot_dataset(dataset_id, seed=1, limit=limit, cutoff=cutoff,
-                     normalize_timeseries=normalize_timeseries, plot_data=(X_train, y_train, X_test, y_test,
-                                                                           X_train_attention, X_test_attention),
+        plot_dataset(series_values, labels, run_prefix, val_split = val_split, seed=1, limit=limit, cutoff=cutoff,
+                     plot_data=(X_train, y_train, X_test, y_test, X_train_attention, X_test_attention),
                      type='Context', plot_classwise=visualize_classwise)
 
     else:
@@ -495,8 +490,8 @@ def write_context_vector(model: Model, dataset_id, dataset_prefix, cutoff=None, 
         plt.show()
 
 
-def visualize_cam(model: Model, dataset_id, dataset_prefix, class_id,
-                  cutoff=None, normalize_timeseries=False, seed=0):
+def visualize_cam(model: Model, series_values, labels, run_prefix, class_id,
+                  val_split = 1/3, cutoff=None, seed=0):
     """
     Used to visualize the Class Activation Maps of the Keras Model.
 
@@ -518,25 +513,18 @@ def visualize_cam(model: Model, dataset_id, dataset_prefix, class_id,
         seed: Random seed number for Numpy.
     """
 
+    inds = np.arange(series_values.shape[0])
     np.random.seed(seed)
+    np.random.shuffle(inds)
+    series_values = series_values[inds]
+    labels = labels[inds]
+    val_split = int(val_split * series_values.shape[0])
+    X_train, y_train = series_values[:-val_split], labels[:-val_split]
+    X_test, y_test = series_values[-val_split:], labels[-val_split:]
+    
+    sequence_length = series_values.shape[1]
 
-    X_train, y_train, _, _, is_timeseries = load_dataset_at(dataset_id,
-                                                            normalize_timeseries=normalize_timeseries)
-    _, sequence_length = calculate_dataset_metrics(X_train)
-
-    if sequence_length != MAX_SEQUENCE_LENGTH_LIST[dataset_id]:
-        if cutoff is None:
-            choice = cutoff_choice(dataset_id, sequence_length)
-        else:
-            assert cutoff in ['pre', 'post'], 'Cutoff parameter value must be either "pre" or "post"'
-            choice = cutoff
-
-        if choice not in ['pre', 'post']:
-            return
-        else:
-            X_train, _ = cutoff_sequence(X_train, _, choice, dataset_id, sequence_length)
-
-    model.load_weights("./weights/%s_weights.h5" % dataset_prefix)
+    model.load_weights("./weights/%s_weights.h5" % run_prefix)
 
     class_weights = model.layers[-1].get_weights()[0]
 
@@ -548,8 +536,7 @@ def visualize_cam(model: Model, dataset_id, dataset_prefix, class_id,
 
     if class_id > 0:
         class_id = class_id - 1
-
-    y_train_ids = np.where(y_train[:, 0] == class_id)
+    y_train_ids = np.where(y_train == class_id)
     sequence_input = X_train[y_train_ids[0], ...]
     choice = np.random.choice(range(len(sequence_input)), 1)
     sequence_input = sequence_input[choice, :, :]
@@ -672,9 +659,8 @@ def write_cam(model: Model, dataset_id, dataset_prefix,
                        header=False, index=False)
 
 
-def visualize_filters(model: Model, dataset_id, dataset_prefix,
-                      conv_id=0, filter_id=0, seed=0, cutoff=None,
-                      normalize_timeseries=False):
+def visualize_filters(model: Model, series_values, labels, run_prefix, val_split = 1/3,
+                      conv_id=0, filter_id=0, seed=0, cutoff=None):
     """
     Used to visualize the output filters of a particular convolution layer.
 
@@ -698,27 +684,21 @@ def visualize_filters(model: Model, dataset_id, dataset_prefix,
             If 2: Performs full dataset z-normalization.
     """
 
+    inds = np.arange(series_values.shape[0])
     np.random.seed(seed)
+    np.random.shuffle(inds)
+    series_values = series_values[inds]
+    labels = labels[inds]
+    val_split = int(val_split * series_values.shape[0])
+    X_train, y_train = series_values[:-val_split], labels[:-val_split]
+    X_test, y_test = series_values[-val_split:], labels[-val_split:]
+    
+    sequence_length = series_values.shape[1]
+
 
     assert conv_id >= 0 and conv_id < 3, "Convolution layer ID must be between 0 and 2"
 
-    X_train, y_train, _, _, is_timeseries = load_dataset_at(dataset_id,
-                                                            normalize_timeseries=normalize_timeseries)
-    _, sequence_length = calculate_dataset_metrics(X_train)
-
-    if sequence_length != MAX_SEQUENCE_LENGTH_LIST[dataset_id]:
-        if cutoff is None:
-            choice = cutoff_choice(dataset_id, sequence_length)
-        else:
-            assert cutoff in ['pre', 'post'], 'Cutoff parameter value must be either "pre" or "post"'
-            choice = cutoff
-
-        if choice not in ['pre', 'post']:
-            return
-        else:
-            X_train, _ = cutoff_sequence(X_train, _, choice, dataset_id, sequence_length)
-
-    model.load_weights("./weights/%s_weights.h5" % dataset_prefix)
+    model.load_weights("./weights/%s_weights.h5" % run_prefix)
 
     conv_layers = [layer for layer in model.layers
                    if layer.__class__.__name__ == 'Conv1D']
@@ -728,18 +708,14 @@ def visualize_filters(model: Model, dataset_id, dataset_prefix,
 
     eval_functions = build_function(model, [conv_layer_name])
 
-    save_dir = os.path.split(dataset_prefix)[0]
+    save_dir = run_prefix
 
     if not os.path.exists('cnn_filters/%s' % (save_dir)):
         os.makedirs('cnn_filters/%s' % (save_dir))
 
-    dataset_name = os.path.split(dataset_prefix)[-1]
-    if dataset_name is None or len(dataset_name) == 0:
-        dataset_name = dataset_prefix
-
     # Select single datapoint
     sample_index = np.random.randint(0, X_train.shape[0])
-    y_id = y_train[sample_index, 0]
+    y_id = y_train[sample_index]
     sequence_input = X_train[[sample_index], :, :]
 
     # Get features of the cnn layer out
@@ -753,7 +729,7 @@ def visualize_filters(model: Model, dataset_id, dataset_prefix,
     channel = channel.reshape((-1, 1))
 
     conv_filters = pd.DataFrame(channel)
-    conv_filters.to_csv('cnn_filters/%s_features.csv' % (dataset_prefix), header=None, index=False)
+    conv_filters.to_csv('cnn_filters/%s_features.csv' % (run_prefix), header=None, index=False)
 
     sequence_input = sequence_input[0, :, :].transpose()
     sequence_df = pd.DataFrame(sequence_input,
@@ -769,7 +745,7 @@ def visualize_filters(model: Model, dataset_id, dataset_prefix,
 
     plt.rcParams.update({'font.size': 24})
 
-    sequence_df.plot(title='Dataset %s : Sequence ID = %d (class = %d)' % (dataset_name,
+    sequence_df.plot(title='Model %s : Sequence ID = %d (class = %d)' % (run_prefix,
                                                                            sample_index + 1,
                                                                            class_label),
                      subplots=False,

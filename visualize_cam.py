@@ -6,7 +6,7 @@ from utils.constants import MAX_SEQUENCE_LENGTH_LIST, NB_CLASSES_LIST, TRAIN_FIL
 from utils.generic_utils import load_dataset_at
 from utils.keras_utils import visualize_cam
 from utils.layer_utils import AttentionLSTM
-
+import numpy as np
 
 def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
 
@@ -79,35 +79,43 @@ def generate_attention_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
 
 
 if __name__ == '__main__':
+    # run prefix
+    run_prefix = 'alstm_4_hr'
+
+    # load rate functions
+    series_size = 240 * 60
+    num_bins = 300
+    min_points = 5
+    filter_bandwidth = 2
+    density = True
+    dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+    series_values =  np.load("../manatee/manatee/rate_values/" + dir_path + "/series_values.npy")
+    # change this line from 'labels.npy' to 'labels_multi.npy' for binary vs. multiclass
+    labels =  np.load("../manatee/manatee/rate_values/" + dir_path + "/labels.npy")
+
+    # randomly shuffle before splitting into training / test / val
+    np.random.seed(0)
+    randomize = np.arange(len(series_values))
+    np.random.shuffle(randomize)
+    series_values = series_values[randomize]
+    series_values = series_values.reshape(-1,1,series_values.shape[1])
+    labels = labels[randomize]
+    train_split = int(0.9 * series_values.shape[0])
+    X_train, y_train  = series_values[:train_split], labels[:train_split]
+    X_test, y_test = series_values[train_split:], labels[train_split:]
+
     # COMMON PARAMETERS
-    DATASET_ID = 0
-    num_cells = 8
-    model = generate_lstmfcn  # Select model to build
-
-    # OLD 85 DATASET PARAMETERS
-    dataset_name = '' # 'cbf'  # set to None to try to find out automatically for new datasets
-
-    # NEW 43 DATASET PARAMETERS
-    model_name = 'lstmfcn'
+    #DATASET_ID = 0
+    num_cells = 128
+    model = generate_attention_lstmfcn  # Select model to build
+    model_name = 'alstmfcn'
 
     # Visualization params
     CLASS_ID = 0
 
     """ <<<<< SCRIPT SETUP >>>>> """
     # Script setup
-    sequence_length = MAX_SEQUENCE_LENGTH_LIST[DATASET_ID]
-    nb_classes = NB_CLASSES_LIST[DATASET_ID]
+    sequence_length = series_values.shape[-1]
+    nb_classes = len(np.unique(labels))
     model = model(sequence_length, nb_classes, num_cells)
-
-    if DATASET_ID >= 85:
-        dataset_name = None
-
-    if dataset_name is None:
-        base_weights_dir = '%s_%d_cells_weights/'
-        dataset_name = TRAIN_FILES[DATASET_ID][8:-6]
-        weights_dir = base_weights_dir % (model_name, num_cells)
-
-        dataset_name = weights_dir + dataset_name
-
-    visualize_cam(model, DATASET_ID, dataset_name, class_id=CLASS_ID, seed=0,
-                  normalize_timeseries=True)
+    visualize_cam(model, X_train, y_train, run_prefix, class_id=CLASS_ID, seed=0)
