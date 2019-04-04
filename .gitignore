@@ -8,3 +8,8 @@ layer_features
 cam_features
 lstm_features
 cnn_filters
+.idea/*
+__pycache__/*
+utils/__pycache__/*
+alstmfcn_*
+lstmfcn_*
