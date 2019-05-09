@@ -79,9 +79,7 @@ time_features = pd.DataFrame(all_emails, columns = ['Timestamp', 'file'])
 
 # convert timestamps to rates
 logging.debug(f'Converting timestamps to rate functions...\n')
-days = 5
-hours = 24
-num_bins = hours * days
+num_bins = 60
 start_date = "2019-03-04"
 start_time = datetime.strptime(start_date, '%Y-%m-%d')
 min_time = int(time.mktime(start_time.timetuple()))
