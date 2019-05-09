@@ -1,0 +1,12 @@
+cmd: python3.6 cnn_lstm_train.py
+deps:
+- md5: 509fd7a468ef2ddeaa29d593033dd367
+  path: cnn_lstm_train.py
+md5: 30a6815cfad05d4884949fe0af458305
+outs:
+- cache: true
+  md5: 025b67e5b50e9a609ce851976d58d30e.dir
+  metric: false
+  path: weights
+  persist: false
+wdir: .
