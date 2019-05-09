@@ -13,3 +13,6 @@ __pycache__/*
 utils/__pycache__/*
 alstmfcn_*
 lstmfcn_*
+deep_ts/*
+
+/weights

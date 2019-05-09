@@ -1,0 +1,4 @@
+['remote "myremote"']
+url = s3://nk-data-science/ASED_dry_run_timeseries
+[core]
+remote = myremote
