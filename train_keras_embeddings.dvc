@@ -1,0 +1,6 @@
+cmd: python3.6 cnn_lstm_train.py
+deps:
+- md5: 4af2e474f45de4d17157202be8bc69fc
+  path: cnn_lstm_train.py
+md5: 2bcea0afba5b4f9f1b708b4ea9062cd3
+wdir: .
