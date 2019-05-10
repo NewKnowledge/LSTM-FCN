@@ -114,9 +114,10 @@ labels = np.array(series_labels)
 
 # generate high-dimensional time features from series_times
 logging.debug(f'Generating high-dimensional time features from rate times...\n')
-t_features = [[parse_time_features(datetime.fromtimestamp(t))[1:] for t in s][0] for s in series_times]
+t_features = [[parse_time_features(datetime.fromtimestamp(t))[1:] for t in s] for s in series_times]
 X_data = [t_feat.append(vals) for t_feat, vals in zip(t_features, series_values)]
 X_data = np.vstack(t_features)
+
 assert len(labels) == X_data.shape[0], f"The number of labels is {len(labels)}, but the number of records is {X_data.shape[0]}"
 
 # splitting data into training and testing 

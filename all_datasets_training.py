@@ -17,12 +17,13 @@ def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8, EMBEDDINGS = Fa
     if EMBEDDINGS:
         input_dims = [13, 32, 8, 25, 61, 61]
         output_dims = [6, 16, 4, 12, 30, 30]
-        input_layers = [Input(shape=(1,)) for i in range(len(input_dims))]
+        input_layers = [Input(shape=(60,)) for i in range(len(input_dims))]
         embedding_layers = [Embedding(input_dims[i], output_dims[i])(input_layers[i]) for i in range(len(input_dims))]
         embedding_layers = [Reshape((-1,))(embedding_layers[i]) for i in range(len(input_dims))]
         embeddings = concatenate(embedding_layers)
     else:
-        embeddings = Input(shape=(7,))
+        ip_sin_features = Input(shape=(60,7,))
+        embeddings = Reshape((-1,))(ip_sin_features)
 
     z = Dense(128, activation='relu')(embeddings)
 
@@ -51,7 +52,7 @@ def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8, EMBEDDINGS = Fa
     if EMBEDDINGS:
         model = Model([ip_rates] + input_layers, out)
     else:
-        model = Model([ip_rates, embeddings], out)
+        model = Model([ip_rates, ip_sin_features], out)
 
     model.summary()
 
@@ -67,12 +68,13 @@ def generate_alstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8, EMBEDDINGS = F
     if EMBEDDINGS:
         input_dims = [13, 32, 8, 25, 61, 61]
         output_dims = [6, 16, 4, 12, 30, 30]
-        input_layers = [Input(shape=(1,)) for i in range(len(input_dims))]
+        input_layers = [Input(shape=(60,)) for i in range(len(input_dims))]
         embedding_layers = [Embedding(input_dims[i], output_dims[i])(input_layers[i]) for i in range(len(input_dims))]
         embedding_layers = [Reshape((-1,))(embedding_layers[i]) for i in range(len(input_dims))]
         embeddings = concatenate(embedding_layers)
     else:
-        embeddings = Input(shape=(7,))
+        ip_sin_features = Input(shape=(60,6,))
+        embeddings = Reshape((-1,))(ip_sin_features)
 
     z = Dense(128, activation='relu')(embeddings)
 
@@ -101,7 +103,7 @@ def generate_alstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8, EMBEDDINGS = F
     if EMBEDDINGS:
         model = Model([ip_rates] + input_layers, out)
     else:
-        model = Model([ip_rates, embeddings], out)
+        model = Model([ip_rates, ip_sin_features], out)
     model.summary()
 
     # add load model code here to fine-tune

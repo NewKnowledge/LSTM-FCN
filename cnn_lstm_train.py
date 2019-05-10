@@ -7,7 +7,7 @@ from utils.layer_utils import AttentionLSTM
 from keras import backend as K
 import pickle
 
-run_prefix = 'dry_run_sin_embeddings'
+run_prefix = 'dry_run_keras_embeddings'
 
 # load saved training data
 X_train = np.load("dry_run_data/prepared/train_X.npy", allow_pickle = True)
