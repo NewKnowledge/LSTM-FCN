@@ -1,8 +1,8 @@
 import os
 
-from keras import backend as K
+from keras import backend as K, regularizers
 from keras.layers import Conv1D, BatchNormalization, GlobalAveragePooling1D, Permute, Dropout, Flatten
-from keras.layers import Input, Dense, LSTM, CuDNNLSTM, concatenate, Activation, GRU, SimpleRNN
+from keras.layers import Input, Dense, LSTM, CuDNNLSTM, concatenate, Activation, GRU, SimpleRNN, Embedding, Reshape
 from keras.models import Model
 
 from utils.constants import MAX_SEQUENCE_LENGTH_LIST, NB_CLASSES_LIST
@@ -10,14 +10,26 @@ from utils.keras_utils import train_model, evaluate_model
 from utils.layer_utils import AttentionLSTM
 
 
-def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
+def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8, EMBEDDINGS = False):
 
-    ip = Input(shape=(1, MAX_SEQUENCE_LENGTH))
+    ip_rates = Input(shape=(1, MAX_SEQUENCE_LENGTH))
 
-    x = LSTM(NUM_CELLS)(ip)
+    if EMBEDDINGS:
+        input_dims = [13, 32, 8, 25, 61, 61]
+        output_dims = [6, 16, 4, 12, 30, 30]
+        input_layers = [Input(shape=(1,)) for i in range(len(input_dims))]
+        embedding_layers = [Embedding(input_dims[i], output_dims[i])(input_layers[i]) for i in range(len(input_dims))]
+        embedding_layers = [Reshape((-1,))(embedding_layers[i]) for i in range(len(input_dims))]
+        embeddings = concatenate(embedding_layers)
+    else:
+        embeddings = Input(shape=(7,))
+
+    z = Dense(128, activation='relu')(embeddings)
+
+    x = LSTM(NUM_CELLS)(ip_rates)
     x = Dropout(0.8)(x)
 
-    y = Permute((2, 1))(ip)
+    y = Permute((2, 1))(ip_rates)
     y = Conv1D(128, 8, padding='same', kernel_initializer='he_uniform')(y)
     y = BatchNormalization()(y)
     y = Activation('relu')(y)
@@ -32,11 +44,14 @@ def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
 
     y = GlobalAveragePooling1D()(y)
 
-    x = concatenate([x, y])
+    x = concatenate([x, y, z])
 
     out = Dense(NB_CLASS, activation='softmax')(x)
 
-    model = Model(ip, out)
+    if EMBEDDINGS:
+        model = Model([ip_rates] + input_layers, out)
+    else:
+        model = Model([ip_rates, embeddings], out)
 
     model.summary()
 
@@ -45,14 +60,26 @@ def generate_lstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
     return model
 
 
-def generate_alstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
+def generate_alstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8, EMBEDDINGS = False):
 
-    ip = Input(shape=(1, MAX_SEQUENCE_LENGTH))
+    ip_rates = Input(shape=(1, MAX_SEQUENCE_LENGTH))
 
-    x = AttentionLSTM(NUM_CELLS)(ip)
+    if EMBEDDINGS:
+        input_dims = [13, 32, 8, 25, 61, 61]
+        output_dims = [6, 16, 4, 12, 30, 30]
+        input_layers = [Input(shape=(1,)) for i in range(len(input_dims))]
+        embedding_layers = [Embedding(input_dims[i], output_dims[i])(input_layers[i]) for i in range(len(input_dims))]
+        embedding_layers = [Reshape((-1,))(embedding_layers[i]) for i in range(len(input_dims))]
+        embeddings = concatenate(embedding_layers)
+    else:
+        embeddings = Input(shape=(7,))
+
+    z = Dense(128, activation='relu')(embeddings)
+
+    x = AttentionLSTM(NUM_CELLS)(ip_rates)
     x = Dropout(0.8)(x)
 
-    y = Permute((2, 1))(ip)
+    y = Permute((2, 1))(ip_rates)
     y = Conv1D(128, 8, padding='same', kernel_initializer='he_uniform')(y)
     y = BatchNormalization()(y)
     y = Activation('relu')(y)
@@ -67,12 +94,14 @@ def generate_alstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=8):
 
     y = GlobalAveragePooling1D()(y)
 
-    x = concatenate([x, y])
+    x = concatenate([x, y, z])
 
     out = Dense(NB_CLASS, activation='softmax')(x)
 
-    model = Model(ip, out)
-
+    if EMBEDDINGS:
+        model = Model([ip_rates] + input_layers, out)
+    else:
+        model = Model([ip_rates, embeddings], out)
     model.summary()
 
     # add load model code here to fine-tune
