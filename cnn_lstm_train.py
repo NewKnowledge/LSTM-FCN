@@ -7,14 +7,25 @@ from utils.layer_utils import AttentionLSTM
 from keras import backend as K
 import pickle
 
-run_prefix = 'dry_run_keras_embeddings'
+EMBEDDINGS = True
+if EMBEDDINGS:
+    run_prefix = 'dry_run_keras_2_embeddings'
+else: 
+    run_prefix = 'dry_run_sin_2_embeddings'
 
+# load saved training data
+
+X_train = np.load("dry_run_data/prepared/train_X_4_hrs.npy", allow_pickle = True)
+y_train = np.load("dry_run_data/prepared/train_y_4_hrs.npy", allow_pickle = True)
+X_test = np.load("dry_run_data/prepared/test_X_4_hrs.npy", allow_pickle = True)
+y_test = np.load("dry_run_data/prepared/test_y_4_hrs.npy", allow_pickle = True)
+'''
 # load saved training data
 X_train = np.load("dry_run_data/prepared/train_X.npy", allow_pickle = True)
 y_train = np.load("dry_run_data/prepared/train_y.npy", allow_pickle = True)
 X_test = np.load("dry_run_data/prepared/test_X.npy", allow_pickle = True)
 y_test = np.load("dry_run_data/prepared/test_y.npy", allow_pickle = True)
-
+'''
 # model parameters
 
 MODEL_NAME = 'alstmfcn'
@@ -32,14 +43,13 @@ file = open(base_log_name % (MODEL_NAME, cell), 'a+')
 
 MAX_SEQUENCE_LENGTH = len(X_train[0][-1])
 NB_CLASS = len(np.unique(y_train))
-EMBEDDINGS = False
 
 # release GPU Memory
 #K.clear_session()
 
 # comment out the training code to only evaluate !
 model = model_fn(MAX_SEQUENCE_LENGTH, NB_CLASS, cell, EMBEDDINGS)
-train_model(model, X_train, y_train, run_prefix, epochs=500, batch_size=128, val_split=1/4, embeddings=EMBEDDINGS)
+#train_model(model, X_train, y_train, run_prefix, epochs=500, batch_size=128, val_split=1/4, embeddings=EMBEDDINGS)
 
 f = evaluate_model(model, X_test, y_test, run_prefix, batch_size=128, embeddings=EMBEDDINGS)
 

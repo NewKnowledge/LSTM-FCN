@@ -8,7 +8,7 @@ from matplotlib.ticker import FuncFormatter
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 from sklearn.model_selection import GridSearchCV, train_test_split
 from skimage.transform import resize
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, confusion_matrix
 
 import warnings
 
@@ -28,13 +28,67 @@ from utils.constants import MAX_SEQUENCE_LENGTH_LIST, TRAIN_FILES
 mpl.style.use('seaborn-paper')
 warnings.simplefilter('ignore', category=DeprecationWarning)
 
+def precision(y_true, y_pred):
+    """Precision metric.
+    Only computes a batch-wise average of precision.
+    Computes the precision, a metric for multi-label classification of
+    how many selected items are relevant.
+    """
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    precision = true_positives / (predicted_positives + K.epsilon())
+    return precision
 
-if not os.path.exists('weights/'):
-    os.makedirs('weights/')
 
+def recall(y_true, y_pred):
+    """Recall metric.
+    Only computes a batch-wise average of recall.
+    Computes the recall, a metric for multi-label classification of
+    how many relevant items are selected.
+    """
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+    recall = true_positives / (possible_positives + K.epsilon())
+    return recall
+
+
+def fbeta_score(y_true, y_pred, beta=1):
+    """Computes the F score.
+    The F score is the weighted harmonic mean of precision and recall.
+    Here it is only computed as a batch-wise average, not globally.
+    This is useful for multi-label classification, where input samples can be
+    classified as sets of labels. By only using accuracy (precision) a model
+    would achieve a perfect score by simply assigning every class to every
+    input. In order to avoid this, a metric should penalize incorrect class
+    assignments as well (recall). The F-beta score (ranged from 0.0 to 1.0)
+    computes this, as a weighted mean of the proportion of correct class
+    assignments vs. the proportion of incorrect class assignments.
+    With beta = 1, this is equivalent to a F-measure. With beta < 1, assigning
+    correct classes becomes more important, and with beta > 1 the metric is
+    instead weighted towards penalizing incorrect class assignments.
+    """
+    if beta < 0:
+        raise ValueError('The lowest choosable beta is zero (only precision).')
+
+    # If there are no true positives, fix the F score at 0 like sklearn.
+    if K.sum(K.round(K.clip(y_true, 0, 1))) == 0:
+        return 0
+
+    p = precision(y_true, y_pred)
+    r = recall(y_true, y_pred)
+    bb = beta ** 2
+    fbeta_score = (1 + bb) * (p * r) / (bb * p + r + K.epsilon())
+    return fbeta_score
+
+
+def fmeasure(y_true, y_pred):
+    """Computes the f-measure, the harmonic mean of precision and recall.
+    Here it is only computed as a batch-wise average, not globally.
+    """
+    return fbeta_score(y_true, y_pred, beta=1)
 
 def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batch_size=128, val_subset = None,
-                val_split = 1/ 3, cutoff=None, normalize_timeseries=False, learning_rate=1e-3, random_state = 0):
+                val_split = 1/ 3, cutoff=None, learning_rate=3e-3, random_state = 0, embeddings = False):
     """
     Trains a provided Model, given a dataset id.
 
@@ -59,16 +113,29 @@ def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batc
             If 2: Performs full dataset z-normalization.
         learning_rate: Initial learning rate.
     """
+    '''
     inds = np.arange(series_values.shape[0])
     np.random.seed(random_state)
     np.random.shuffle(inds)
     series_values = series_values[inds]
     labels = labels[inds]
+    '''   
+    # add embeddings for higher d time features
     val_split = int(val_split * series_values.shape[0])
-    X_train, y_train = series_values[:-val_split], labels[:-val_split]
-    X_test, y_test = series_values[-val_split:], labels[-val_split:]
-    
-    sequence_length = series_values.shape[1]
+    if embeddings:
+        X_embeddings = np.stack([[[f[i] for f in f_v[:-1]] for i in range(1,7)] for f_v in series_values], axis = 0)
+        X_train_embeddings, X_test_embeddings = X_embeddings[:-val_split], X_embeddings[-val_split:]
+    else: 
+        X_sin = np.stack([[np.sin(t)[1:] for t in feature_vector[:-1]] for feature_vector in series_values], axis = 0)
+        X_train_sin, X_test_sin = X_sin[:-val_split], X_sin[-val_split:]
+
+    # extract rate functions from input data
+    X_rates = np.vstack([feature_vector[-1] for feature_vector in series_values])
+    X_rates = X_rates.reshape(-1,1,X_rates.shape[1])
+
+    X_train_rates, X_test_rates = X_rates[:-val_split], X_rates[-val_split:]
+    y_train, y_test = labels[:-val_split], labels[-val_split:]
+ 
     classes = np.unique(y_train)
     le = LabelEncoder()
     y_ind = le.fit_transform(y_train.ravel())
@@ -88,26 +155,30 @@ def train_model(model: Model, series_values, labels, run_prefix, epochs=50, batc
 
     model_checkpoint = ModelCheckpoint("./weights/%s_weights.h5" % run_prefix, verbose=1,
                                        monitor='val_loss', save_best_only=True, save_weights_only=True)
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', patience=20, mode='auto',
-                                  factor=1. / np.cbrt(2), cooldown=0, min_lr=1e-4, verbose=2)
-    earlystopping = EarlyStopping(monitor = 'val_loss', patience=100)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', patience=3, mode='auto',
+                                  factor=1. / np.cbrt(2), cooldown=0, min_lr=1e-5, verbose=2)
+    earlystopping = EarlyStopping(monitor = 'val_loss', patience=20)
 
     callback_list = [model_checkpoint, reduce_lr, earlystopping]
 
     optm = Adam(lr=learning_rate)
 
-    model.compile(optimizer=optm, loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer=optm, loss='categorical_crossentropy', metrics=[fmeasure])
 
-    if val_subset is not None:
-        X_test = X_test[:val_subset]
-        y_test = y_test[:val_subset]
-
-    model.fit(X_train, y_train, batch_size=batch_size, epochs=epochs, callbacks=callback_list,
-              class_weight=class_weight, verbose=2, validation_data=(X_test, y_test))
+    if embeddings:
+        X_train = [X_train_rates]
+        [X_train.append(X_train_embeddings[:,i]) for i in range(6)]
+        X_test = [X_test_rates]
+        [X_test.append(X_test_embeddings[:,i]) for i in range(6)]
+        model.fit(X_train, y_train, batch_size=batch_size, epochs=epochs, callbacks=callback_list, 
+                class_weight=class_weight, verbose=2, validation_data=(X_test, y_test))
+    else:
+        model.fit([X_train_rates, X_train_sin], y_train, batch_size=batch_size, epochs=epochs, callbacks=callback_list,
+              class_weight=class_weight, verbose=2, validation_data=([X_test_rates, X_test_sin], y_test))
 
 
 def evaluate_model(model: Model, X_test, y_test, run_prefix, test_data_subset=None, batch_size=128,
-                   cutoff=None, normalize_timeseries=False):
+                   cutoff=None, embeddings = False):
     """
     Evaluates a given Keras Model on the provided dataset.
 
@@ -132,25 +203,47 @@ def evaluate_model(model: Model, X_test, y_test, run_prefix, test_data_subset=No
     Returns:
         The test set accuracy of the model.
     """
-    sequence_length = X_test.shape[1]
+
+   # add embeddings for higher d time features
+    if embeddings:
+        X_test_embeddings = np.stack([[[f[i] for f in f_v[:-1]] for i in range(1,7)] for f_v in X_test], axis = 0)
+        if test_data_subset is not None:
+            X_test_embeddings = X_test_embeddings[:test_data_subset]
+
+    else: 
+        X_test_sin = np.stack([[np.sin(t)[1:] for t in feature_vector[:-1]] for feature_vector in X_test], axis=0)
+        if test_data_subset is not None:
+            X_test_sin = X_test_sin[:test_data_subset]
+    # extract rate functions from input data
+    X_test_rates = np.vstack([feature_vector[-1] for feature_vector in X_test])
+    X_test_rates = X_test_rates.reshape(-1,1,X_test_rates.shape[1])
+
     y_test = to_categorical(y_test, len(np.unique(y_test)))
 
-    optm = Adam(lr=1e-3)
-    model.compile(optimizer=optm, loss='categorical_crossentropy', metrics=['accuracy'])
+    optm = Adam(lr=3e-3)
+    model.compile(optimizer=optm, loss='categorical_crossentropy', metrics=[fmeasure])
 
     model.load_weights("./weights/%s_weights.h5" % run_prefix)
     print("Weights loaded from ", "./weights/%s_weights.h5" % run_prefix)
 
     if test_data_subset is not None:
-        X_test = X_test[:test_data_subset]
+        X_test_rates = X_test_rates[:test_data_subset]
         y_test = y_test[:test_data_subset]
 
     print("\nEvaluating on {} predictions: ".format(len(y_test)))
-    loss, accuracy = model.evaluate(X_test, y_test, batch_size=batch_size)
-    print("Final Accuracy : ", accuracy)
-    print(classification_report(np.argmax(y_test,axis=1), np.argmax(model.predict(X_test), axis=1), target_names = ['non-anomalous', 'anomalous']))
-    return accuracy
-
+    if embeddings:
+        X_test = [X_test_rates]
+        [X_test.append(X_test_embeddings[:,i]) for i in range(6)]
+        loss, f  = model.evaluate(X_test, y_test, batch_size=batch_size)
+        print("Final F1 : ", f)
+        print(classification_report(np.argmax(y_test,axis=1), np.argmax(model.predict(X_test), axis=1), target_names = ['ham', 'spam']))
+        print(confusion_matrix(np.argmax(y_test,axis=1), np.argmax(model.predict(X_test), axis=1)))
+    else:
+        loss, f = model.evaluate([X_test_rates, X_test_sin], y_test, batch_size=batch_size)
+        print("Final F1 : ", f)
+        print(classification_report(np.argmax(y_test,axis=1), np.argmax(model.predict([X_test_rates, X_test_sin]), axis=1), target_names = ['ham', 'spam']))
+        print(confusion_matrix(np.argmax(y_test,axis=1), np.argmax(model.predict([X_test_rates, X_test_sin]), axis=1)))
+    return f
 
 def loss_model(model: Model, dataset_id, dataset_prefix, batch_size=128, train_data_subset=None,
                cutoff=None, normalize_timeseries=False):

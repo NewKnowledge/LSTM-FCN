@@ -79,13 +79,15 @@ time_features = pd.DataFrame(all_emails, columns = ['Timestamp', 'file'])
 
 # convert timestamps to rates
 logging.debug(f'Converting timestamps to rate functions...\n')
+days = 5
+hours = 24
 num_bins = 60
 start_date = "2019-03-04"
 start_time = datetime.strptime(start_date, '%Y-%m-%d')
 min_time = int(time.mktime(start_time.timetuple()))
-series_size = 3600
+series_size = 60 * 60 * 4
 window = 60
-max_time = min_time + num_bins * series_size
+max_time = min_time + days * hours * 3600
 
 # create time series (1 series / hr --> 120 total series)
 times = time_features['Timestamp'].values.astype(int)
@@ -94,11 +96,11 @@ series_values = []
 series_times = []
 series_labels = []
 t = min_time
-while (t < max_time):
+while ((t + series_size) < max_time):
     events = times[(t <= times) & (times < (t + series_size))]
     rate_vals, rate_times = events_to_rates(times, 
                                             num_bins = num_bins, 
-                                            filter_bandwidth = 1, 
+                                             filter_bandwidth = 1, 
                                             density = False,
                                             min_time = t,
                                             max_time = t + series_size)
@@ -123,13 +125,13 @@ assert len(labels) == X_data.shape[0], f"The number of labels is {len(labels)}, 
 # splitting data into training and testing 
 train_split = int(0.8 * len(labels))
 logging.debug(f'Splitting data into training and testing sets...')
-if not os.path.isfile(datapath + "/prepared/train_X.npy"):
+'''if not os.path.isfile(datapath + "/prepared/train_X.npy"):
     os.mkdir(datapath + "/prepared")
-
-np.save(datapath + "/prepared/train_X.npy", X_data[:train_split])
-np.save(datapath + "/prepared/train_y.npy", labels[:train_split])
-np.save(datapath + "/prepared/test_X.npy", X_data[train_split:])
-np.save(datapath + "/prepared/test_y.npy", labels[train_split:])
+'''
+np.save(datapath + "/prepared/train_X_4_hrs.npy", X_data[:train_split])
+np.save(datapath + "/prepared/train_y_4_hrs.npy", labels[:train_split])
+np.save(datapath + "/prepared/test_X_4_hrs.npy", X_data[train_split:])
+np.save(datapath + "/prepared/test_y_4_hrs.npy", labels[train_split:])
 
 logging.debug(f'Train set: March 4 - March 7 contains {train_split} series')
 logging.debug(f'Test set: March 8 contains {len(labels) - train_split} series')
